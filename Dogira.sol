@@ -651,7 +651,6 @@ contract Storage {
         uint256 tTotal;
         uint256 rTotal;
         uint256 lastShill;
-        mapping(address => uint256) allowances;
     }
 
     struct Divisors {
@@ -685,6 +684,8 @@ contract Storage {
         uint256 lastAttack;
         uint256 attackCooldown;
         mapping(address => Account) accounts;
+        mapping(address => mapping(address => uint256)) allowances;
+
         address[] entries;
         string symbol;
         string name;
@@ -717,6 +718,14 @@ contract Getters is State {
             return true;
         }
         return state.accounts[sender].feeless || state.accounts[recipient].feeless;
+    }
+    
+    function getAccount(address account) public view returns(Storage.Account memory) {
+        return state.accounts[account];
+    }
+
+    function getDivisors() external view returns(Storage.Divisors memory) {
+        return state.divisors;
     }
 
     function getBurned() external view returns(uint256) {
@@ -958,7 +967,7 @@ contract Dogira is IERC20, Getters, Owned {
     }
 
     function allowance(address owner, address spender) public view override returns (uint256) {
-        return state.accounts[owner].allowances[spender];
+        return state.allowances[owner][spender];
     }
 
     function balanceOf(address account) public view override returns (uint256) {
@@ -974,17 +983,17 @@ contract Dogira is IERC20, Getters, Owned {
         require(owner != address(0), "ERC20: approve from the zero address");
         require(spender != address(0), "ERC20: approve to the zero address");
 
-        state.accounts[owner].allowances[spender] = amount;
+        state.allowances[owner][spender] = amount;
         emit Approval(owner, spender, amount);
     }
 
     function increaseAllowance(address spender, uint256 addedValue) public virtual returns (bool) {
-        _approve(_msgSender(), spender, state.accounts[_msgSender()].allowances[spender] + addedValue);
+        _approve(_msgSender(), spender, state.allowances[_msgSender()][spender] + addedValue);
         return true;
     }
 
     function decreaseAllowance(address spender, uint256 subtractedValue) public virtual returns (bool) {
-        _approve(_msgSender(), spender, state.accounts[_msgSender()].allowances[spender] - (subtractedValue));
+        _approve(_msgSender(), spender, state.allowances[_msgSender()][spender] - (subtractedValue));
         return true;
     }
 
@@ -999,7 +1008,7 @@ contract Dogira is IERC20, Getters, Owned {
 
     function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
         _transfer(sender, recipient, amount);
-        _approve(sender, _msgSender(), state.accounts[sender].allowances[_msgSender()] - amount);
+        _approve(sender, _msgSender(), state.allowances[sender][_msgSender()] - amount);
         return true;
     }
 
@@ -1206,7 +1215,7 @@ contract Dogira is IERC20, Getters, Owned {
         state.addresses.presale = account;
         state.accounts[account].feeless = true;
     }
-    
+
     function setBuyBonusDivisor(uint8 fd) external ownerOnly {
         require(fd >= 20, "can't be more than 5%");
         state.divisors.bonus = fd;
