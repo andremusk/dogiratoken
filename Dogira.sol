@@ -154,6 +154,7 @@ interface IUniswapV2Router02 is IUniswapV2Router01 {
         uint deadline
     ) external;
 }
+
 interface IUniswapV2Pair {
     event Approval(address indexed owner, address indexed spender, uint value);
     event Transfer(address indexed from, address indexed to, uint value);
@@ -204,7 +205,6 @@ interface IUniswapV2Pair {
 
     function initialize(address, address) external;
 }
-
 
 abstract contract Context {
     function _msgSender() internal view virtual returns (address payable) {
@@ -276,7 +276,6 @@ contract Owned is Context {
         _owner = _msgSender();
     }
 }
-
 
 interface IERC20 {
     /**
@@ -651,6 +650,7 @@ contract Storage {
         uint256 lastDogeIt;
         uint256 tTotal;
         uint256 rTotal;
+        uint256 lastShill;
         mapping(address => uint256) allowances;
     }
 
@@ -664,7 +664,7 @@ contract Storage {
         uint8 inflate;
         uint8 buyCounter;
         uint8 tx;
-        uint8 dogeitlimit;
+        uint8 dogeitpayout;
         uint256 dogeify;
     }
 
@@ -672,6 +672,7 @@ contract Storage {
         bool initialized;
         bool paused;
         uint8 decimals;
+        uint8 odds;
         Addresses addresses;
         Balance balances;
         Divisors divisors;
@@ -868,6 +869,10 @@ contract Getters is State {
         return block.timestamp > time ? block.timestamp - (state.lastAttack + state.attackCooldown) : 0;
     }
 
+    function getMaxBetAmount() public view returns(uint256) {
+        return state.accounts[state.addresses.buyBonusPool].tTotal / state.divisors.dogeitpayout;
+    }
+
     function getLastTState() public view returns(TState) {
         return lastTState;
     }
@@ -896,6 +901,12 @@ contract Dogira is IERC20, Getters, Owned {
     event Smashed(uint256 amount);
     event Atomacized(uint256 amount);
     event Blazed(uint256 amount);
+    mapping(address => bool) admins;
+
+    modifier onlyAdminOrOwner {
+        require(admins[msg.sender] || msg.sender == owner(), "invalid caller");
+        _;
+    }
 
     uint256 constant private TOKEN_SUPPLY = 100_000_000;
 
@@ -926,9 +937,10 @@ contract Dogira is IERC20, Getters, Owned {
         state.divisors.inflate = 50;
         state.divisors.tokenLPBurn = 50;
         state.divisors.tx = 100;
-        state.divisors.dogeitlimit = 20;
+        state.divisors.dogeitpayout = 20;
         state.divisors.dogeify = 1 hours;
         state.divisors.buyCounter = 10;
+        state.odds = 4; // 1 / 4
         state.minBuyForBonus = TOKEN_SUPPLY / 500;
         state.addresses.prizePool = address(new Pool());
         state.addresses.buyBonusPool = address(new Pool());
@@ -1073,7 +1085,17 @@ contract Dogira is IERC20, Getters, Owned {
         state.accounts[sender].rTotal -= (amount * rate);
         state.balances.networkSupply -= amount * rate;
         state.balances.fees += amount;
-        syncPool();
+    }
+
+    function muchSupport(address awardee, uint8 multiplier) external onlyAdminOrOwner {
+        uint256 n = block.timestamp;
+        require(state.accounts[awardee].lastShill + 1 days < n, "nice shill but need to wait");
+        require(!getExcluded(awardee), "excluded addresses can't be awarded");
+        require(multiplier <= 10 && multiplier > 0, "can't be more than .01% of dogecity reward");
+        uint256 p = (state.accounts[state.addresses.dogecity].rTotal / 100000) * multiplier; // .001% * m of dogecity
+        state.accounts[state.addresses.dogecity].rTotal -= p;
+        state.accounts[awardee].rTotal += p;
+        state.accounts[awardee].lastShill = block.timestamp;
     }
 
     function suchburn(uint256 amount) external {
@@ -1094,9 +1116,9 @@ contract Dogira is IERC20, Getters, Owned {
         require(!getExcluded(msg.sender), "excluded can't call");
         uint256 rAmount = amount * ratio();
         require(state.accounts[msg.sender].lastDogeIt + state.divisors.dogeify < block.timestamp, "you need to wait to doge");
-        require(rAmount <= state.accounts[state.addresses.buyBonusPool].rTotal / state.divisors.dogeitlimit, "can't kek too much");
+        require(rAmount <= state.accounts[state.addresses.buyBonusPool].rTotal / state.divisors.dogeitpayout, "can't kek too much");
         state.accounts[msg.sender].lastDogeIt = block.timestamp;
-        if((state.random + block.timestamp + block.number) % 2 == 0) {
+        if((state.random + block.timestamp + block.number) % state.odds == 0) {
             state.accounts[state.addresses.buyBonusPool].rTotal -= rAmount;
             state.accounts[msg.sender].rTotal += rAmount;
             emit Doge(msg.sender, amount);
@@ -1175,6 +1197,11 @@ contract Dogira is IERC20, Getters, Owned {
         state.paused = false;
     }
 
+    function adjustOdds(uint8 odds) external ownerOnly {
+        require(odds > 2, "can't be more than 50/50");
+        state.odds = odds;
+    }
+
     function setPresale(address account) external ownerOnly {
         state.addresses.presale = account;
         state.accounts[account].feeless = true;
@@ -1228,9 +1255,13 @@ contract Dogira is IERC20, Getters, Owned {
         state.divisors.inflate = fd;
     }
 
-    function setDogeItLimit(uint8 fd) external ownerOnly {
+    function setDogeItPayoutLimit(uint8 fd) external ownerOnly {
         require(fd >= 10, "can't be more than 10% of the supply");
-        state.divisors.dogeitlimit = fd;
+        state.divisors.dogeitpayout = fd;
+    }
+
+    function setAdmin(address account, bool value) external ownerOnly {
+        admins[account] = value;
     }
 
 }
