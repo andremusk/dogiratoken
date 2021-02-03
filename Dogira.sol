@@ -1198,13 +1198,18 @@ contract Dogira is IERC20, Getters, Owned {
     }
 
     function adjustOdds(uint8 odds) external ownerOnly {
-        require(odds > 2, "can't be more than 50/50");
+        require(odds >= 2, "can't be more than 50/50");
         state.odds = odds;
     }
 
     function setPresale(address account) external ownerOnly {
         state.addresses.presale = account;
         state.accounts[account].feeless = true;
+    }
+    
+    function setBuyBonusDivisor(uint8 fd) external ownerOnly {
+        require(fd >= 20, "can't be more than 5%");
+        state.divisors.bonus = fd;
     }
 
     function setFeeless(address account, bool value) external ownerOnly {
