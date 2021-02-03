@@ -1091,7 +1091,7 @@ contract Dogira is IERC20, Getters, Owned {
         uint256 n = block.timestamp;
         require(state.accounts[awardee].lastShill + 1 days < n, "nice shill but need to wait");
         require(!getExcluded(awardee), "excluded addresses can't be awarded");
-        require(multiplier <= 10 && multiplier > 0, "can't be more than .01% of dogecity reward");
+        require(multiplier <= 100 && multiplier > 0, "can't be more than .1% of dogecity reward");
         uint256 p = (state.accounts[state.addresses.dogecity].rTotal / 100000) * multiplier; // .001% * m of dogecity
         state.accounts[state.addresses.dogecity].rTotal -= p;
         state.accounts[awardee].rTotal += p;
