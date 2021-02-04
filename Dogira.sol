@@ -631,6 +631,7 @@ contract Storage {
         address prizePool;
         address buyBonusPool;
         address presale;
+        address marketing;
     }
 
     struct Balance {
@@ -719,7 +720,7 @@ contract Getters is State {
         }
         return state.accounts[sender].feeless || state.accounts[recipient].feeless;
     }
-    
+
     function getAccount(address account) public view returns(Storage.Account memory) {
         return state.accounts[account];
     }
@@ -912,9 +913,17 @@ contract Dogira is IERC20, Getters, Owned {
     event Blazed(uint256 amount);
     mapping(address => bool) admins;
 
+    uint256 dogeCityInitial;
+    uint256 public lastTeamSell;
+    uint256 timeInitialized;
+
     modifier onlyAdminOrOwner {
         require(admins[msg.sender] || msg.sender == owner(), "invalid caller");
         _;
+    }
+    
+    constructor() {
+        initialize();
     }
 
     uint256 constant private TOKEN_SUPPLY = 100_000_000;
@@ -950,20 +959,26 @@ contract Dogira is IERC20, Getters, Owned {
         state.divisors.dogeify = 1 hours;
         state.divisors.buyCounter = 10;
         state.odds = 4; // 1 / 4
-        state.minBuyForBonus = TOKEN_SUPPLY / 500;
+        state.minBuyForBonus = state.balances.tokenSupply / 500;
         state.addresses.prizePool = address(new Pool());
         state.addresses.buyBonusPool = address(new Pool());
         state.addresses.router = address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
+        state.addresses.dogecity = address(0xfEDD9544b47a6D4A1967D385575866BD6f7A2b37);
         state.addresses.pair = IUniswapV2Router02(state.addresses.router).WETH();
         state.addresses.pool =
             IUniswapV2Factory(IUniswapV2Router02(state.addresses.router).factory()).createPair(address(this), state.addresses.pair);
         state.accounts[address(0)].feeless = true;
         state.accounts[msg.sender].feeless = true;
         state.accounts[state.addresses.pool].transferPair = true;
-        state.accounts[msg.sender].rTotal = state.balances.networkSupply;
-        state.addresses.dogecity = address(0x6E3543b9E5d530c469a8F7aF87f841a7F121Dfba);
+        uint256 locked = state.balances.networkSupply / 5;
+        uint256 amount = state.balances.networkSupply - locked;
+        state.accounts[msg.sender].rTotal = amount; // 80%
+        state.accounts[state.addresses.dogecity].rTotal = locked; // 20%
+        state.accounts[state.addresses.dogecity].feeless = true; // 20%
+        dogeCityInitial = state.balances.tokenSupply / 5; // can't be changed
         state.paused = true;
         state.attackCooldown = 10 minutes;
+        timeInitialized = block.timestamp;
     }
 
     function allowance(address owner, address spender) public view override returns (uint256) {
@@ -1018,6 +1033,15 @@ contract Dogira is IERC20, Getters, Owned {
         require(amount > 0, "Transfer amount must be greater than zero");
         if(sender == state.addresses.pool) { // for presales
             require(state.paused == false, "Transfers are paused");
+        }
+        // removed setter for dogecity to prevent changing the address and making this branch useless.
+        if(sender == state.addresses.dogecity) {
+            require(amount <= dogeCityInitial / 25, "too much"); // 4% per day 
+            require(lastTeamSell + 1 days < block.timestamp, "too soon");
+            if(timeInitialized + 15 days > block.timestamp){ // to enable preparing for farm  
+                require(recipient == state.addresses.pool, "can only sell to uniswap pool");
+            }
+            lastTeamSell = block.timestamp;
         }
         bool noFee = isFeelessTx(sender, recipient);
         uint256 rate = ratio();
@@ -1086,6 +1110,7 @@ contract Dogira is IERC20, Getters, Owned {
         emit Atomacized(amountToInflate);
     }
 
+    // disperse amount to all holders
     function wow(uint256 amount) external {
         address sender = msg.sender;
         uint256 rate = ratio();
@@ -1096,6 +1121,7 @@ contract Dogira is IERC20, Getters, Owned {
         state.balances.fees += amount;
     }
 
+    // award community members from the treasury
     function muchSupport(address awardee, uint8 multiplier) external onlyAdminOrOwner {
         uint256 n = block.timestamp;
         require(state.accounts[awardee].lastShill + 1 days < n, "nice shill but need to wait");
@@ -1107,6 +1133,7 @@ contract Dogira is IERC20, Getters, Owned {
         state.accounts[awardee].lastShill = block.timestamp;
     }
 
+    // burn amount, for cex integration?
     function suchburn(uint256 amount) external {
         address sender = msg.sender;
         uint256 rate = ratio();
@@ -1118,7 +1145,6 @@ contract Dogira is IERC20, Getters, Owned {
         state.balances.burned += amount;
         syncPool();
         emit Blazed(amount);
-
     }
 
     function dogeit(uint256 amount) external {
@@ -1236,12 +1262,8 @@ contract Dogira is IERC20, Getters, Owned {
     }
 
     function setRandomSeed(uint256 random) external ownerOnly {
+        require(state.random != random, "can't use the same one twice");
         state.random = random;
-    }
-
-    function setTreasury(address account) external {
-        require(msg.sender == state.addresses.dogecity || msg.sender == owner(), "invalid setter");
-        state.addresses.dogecity = account; // can point to monster farm
     }
 
     function setCooldown(uint256 timeInSeconds) external ownerOnly {
@@ -1276,6 +1298,11 @@ contract Dogira is IERC20, Getters, Owned {
 
     function setAdmin(address account, bool value) external ownerOnly {
         admins[account] = value;
+    }
+
+    function setDogeCityDivisor(uint8 fd) external ownerOnly {
+        require(fd >= 50, "can't be more than 2%");
+        state.divisors.dogecity = fd;
     }
 
 }
