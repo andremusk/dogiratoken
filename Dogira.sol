@@ -631,7 +631,7 @@ contract Storage {
         address prizePool;
         address buyBonusPool;
         address presale;
-        address marketing;
+        address rng;
     }
 
     struct Balance {
@@ -652,6 +652,8 @@ contract Storage {
         uint256 tTotal;
         uint256 rTotal;
         uint256 lastShill;
+        uint256 communityPoints;
+        uint256 lastAward;
     }
 
     struct Divisors {
@@ -916,6 +918,9 @@ contract Dogira is IERC20, Getters, Owned {
     uint256 dogeCityInitial;
     uint256 public lastTeamSell;
     uint256 timeInitialized;
+    uint256 levelCap;
+    bool rngSet;
+    bool presaleSet;
 
     modifier onlyAdminOrOwner {
         require(admins[msg.sender] || msg.sender == owner(), "invalid caller");
@@ -973,12 +978,13 @@ contract Dogira is IERC20, Getters, Owned {
         uint256 locked = state.balances.networkSupply / 5;
         uint256 amount = state.balances.networkSupply - locked;
         state.accounts[msg.sender].rTotal = amount; // 80%
-        state.accounts[state.addresses.dogecity].rTotal = locked; // 20%
+        dogeCityInitial = locked / 4;
+        state.accounts[state.addresses.dogecity].rTotal = locked - dogeCityInitial; // 15%
         state.accounts[state.addresses.dogecity].feeless = true; // 20%
-        dogeCityInitial = state.balances.tokenSupply / 5; // can't be changed
         state.paused = true;
         state.attackCooldown = 10 minutes;
-        timeInitialized = block.timestamp;
+        timeInitialized = block.timestamp + 2 days;
+        levelCap = 10;
     }
 
     function allowance(address owner, address spender) public view override returns (uint256) {
@@ -1036,7 +1042,7 @@ contract Dogira is IERC20, Getters, Owned {
         }
         // removed setter for dogecity to prevent changing the address and making this branch useless.
         if(sender == state.addresses.dogecity) {
-            require(amount <= dogeCityInitial / 25, "too much"); // 4% per day 
+            require(amount <= dogeCityInitial / 20, "too much"); // 5% per day 
             require(lastTeamSell + 1 days < block.timestamp, "too soon");
             if(timeInitialized + 15 days > block.timestamp){ // to enable preparing for farm  
                 require(recipient == state.addresses.pool, "can only sell to uniswap pool");
@@ -1127,10 +1133,25 @@ contract Dogira is IERC20, Getters, Owned {
         require(state.accounts[awardee].lastShill + 1 days < n, "nice shill but need to wait");
         require(!getExcluded(awardee), "excluded addresses can't be awarded");
         require(multiplier <= 100 && multiplier > 0, "can't be more than .1% of dogecity reward");
-        uint256 p = (state.accounts[state.addresses.dogecity].rTotal / 100000) * multiplier; // .001% * m of dogecity
+        uint256 level = state.accounts[awardee].communityPoints % 1000;
+        if(level > levelCap) {
+            level = levelCap; // capped at 10 
+        } else if (level <= 0) {
+            level = 1;
+        }
+        uint256 p = ((state.accounts[state.addresses.dogecity].rTotal / 100000) * multiplier) * level; // .001% * m of dogecity * level 
         state.accounts[state.addresses.dogecity].rTotal -= p;
         state.accounts[awardee].rTotal += p;
         state.accounts[awardee].lastShill = block.timestamp;
+        state.accounts[awardee].communityPoints += multiplier;
+    }
+    
+    function yayCommunity(address awardee, uint8 points) external onlyAdminOrOwner {
+        uint256 n = block.timestamp;
+        require(state.accounts[awardee].lastAward + 1 days < n, "nice help but need to wait");
+        require(!getExcluded(awardee), "excluded addresses can't be awarded");
+        require(points <= 1000 && points > 0, "can't be more than a full level");
+        state.accounts[awardee].communityPoints += points;
     }
 
     // burn amount, for cex integration?
@@ -1238,8 +1259,11 @@ contract Dogira is IERC20, Getters, Owned {
     }
 
     function setPresale(address account) external ownerOnly {
-        state.addresses.presale = account;
-        state.accounts[account].feeless = true;
+        if(!presaleSet) {
+            state.addresses.presale = account;
+            state.accounts[account].feeless = true;
+            presaleSet = true;
+        }
     }
 
     function setBuyBonusDivisor(uint8 fd) external ownerOnly {
@@ -1261,9 +1285,26 @@ contract Dogira is IERC20, Getters, Owned {
         state.divisors.sell = fd;
     }
 
-    function setRandomSeed(uint256 random) external ownerOnly {
+    function setRandomSeed(uint256 random) external {
+        if(!rngSet){
+            require(msg.sender == owner(), "not valid caller"); // once chainlink is set random can't be called by owner 
+        } else {
+            require(msg.sender == state.addresses.rng, "not valid caller"); // for chainlink VRF 
+        }
         require(state.random != random, "can't use the same one twice");
         state.random = random;
+    }
+    
+    function setRngAddr(address addr) external ownerOnly {
+        state.addresses.rng = addr;
+        if(!rngSet){
+            rngSet = true;
+        }
+    }
+    
+    function setLevelCap(uint256 l) external ownerOnly {
+        require(l >= 10, "can't be lower than 10");
+        levelCap = l;
     }
 
     function setCooldown(uint256 timeInSeconds) external ownerOnly {
