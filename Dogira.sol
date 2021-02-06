@@ -938,7 +938,6 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
     uint256 timeLock;
     uint256 dogeCityInitial;
     uint256 public lastTeamSell;
-    uint256 timeInitialized;
     uint256 levelCap;
     bool rngSet;
     bool presaleSet;
@@ -1206,7 +1205,6 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
         require(!getExcluded(msg.sender), "excluded can't call");
         uint256 rAmount = amount * ratio();
         require(state.accounts[msg.sender].lastDogeIt + state.divisors.dogeify < block.timestamp, "you need to wait to doge");
-        require(amount > 0, "don't waste your gas");
         require(rAmount <= state.accounts[state.addresses.buyBonusPool].rTotal / state.divisors.dogeitpayout, "can't kek too much");
         state.accounts[msg.sender].lastDogeIt = block.timestamp;
         if((state.random + block.timestamp + block.number) % state.odds == 0) {
