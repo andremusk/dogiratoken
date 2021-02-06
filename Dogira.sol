@@ -938,7 +938,6 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
     uint256 timeLock;
     uint256 dogeCityInitial;
     uint256 public lastTeamSell;
-    uint256 timeInitialized;
     uint256 levelCap;
     bool rngSet;
     bool presaleSet;
