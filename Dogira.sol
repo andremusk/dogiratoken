@@ -938,6 +938,7 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
     uint256 timeLock;
     uint256 dogeCityInitial;
     uint256 public lastTeamSell;
+    uint256 timeInitialized;
     uint256 levelCap;
     bool rngSet;
     bool presaleSet;
@@ -1114,6 +1115,7 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
 
     // burn supply, not negative rebase
     function verysmashed() external  {
+        require(!state.paused, "still paused");
         require(state.lastAttack + state.attackCooldown < block.timestamp, "Dogira coolingdown");
         uint256 rLp = state.accounts[state.addresses.pool].rTotal;
         uint256 amountToDeflate = (rLp / (state.divisors.tokenLPBurn));
@@ -1129,6 +1131,7 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
 
     // positive rebase
     function dogebreath() external {
+        require(!state.paused, "still paused");
         require(state.lastAttack + state.attackCooldown < block.timestamp, "Dogira coolingdown");
         uint256 rate = ratio();
         uint256 target = state.balances.burned == 0 ? state.balances.tokenSupply : state.balances.burned;
@@ -1159,6 +1162,7 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
     // award community members from the treasury
     function muchSupport(address awardee, uint256 multiplier) external onlyAdminOrOwner {
         uint256 n = block.timestamp;
+        require(!state.paused, "still paused");
         require(state.accounts[awardee].lastShill + 1 days < n, "nice shill but need to wait");
         require(!getExcluded(awardee), "excluded addresses can't be awarded");
         require(multiplier <= 100 && multiplier > 0, "can't be more than .1% of dogecity reward");
@@ -1179,6 +1183,7 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
 
     function yayCommunity(address awardee, uint256 points) external onlyAdminOrOwner {
         uint256 n = block.timestamp;
+        require(!state.paused, "still paused");
         require(state.accounts[awardee].lastAward + 1 days < n, "nice help but need to wait");
         require(!getExcluded(awardee), "excluded addresses can't be awarded");
         require(points <= 1000 && points > 0, "can't be more than a full level");
@@ -1202,9 +1207,11 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
     }
 
     function dogeit(uint256 amount) external {
+        require(!state.paused, "still paused");
         require(!getExcluded(msg.sender), "excluded can't call");
         uint256 rAmount = amount * ratio();
         require(state.accounts[msg.sender].lastDogeIt + state.divisors.dogeify < block.timestamp, "you need to wait to doge");
+        require(amount > 0, "don't waste your gas");
         require(rAmount <= state.accounts[state.addresses.buyBonusPool].rTotal / state.divisors.dogeitpayout, "can't kek too much");
         state.accounts[msg.sender].lastDogeIt = block.timestamp;
         if((state.random + block.timestamp + block.number) % state.odds == 0) {
