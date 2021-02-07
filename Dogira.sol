@@ -1257,11 +1257,13 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
             t.fee = getFee(amount, state.divisors.tx);
             t.operationalFee = getFee(amount, state.divisors.dogecity);
             if(ts == TState.Sell) {
-                t.sellFee = getFee(amount, state.divisors.sell) / getLevel(sender);
+                uint256 sellFee = getFee(amount, state.divisors.sell);
+                t.sellFee = sellFee - ((sellFee * getLevel(sender)) / levelCap);
             }
             if(ts == TState.Buy) {
                 t.buyFee = getFee(amount, getBuyTax(amount));
-                t.buyBonus = getBuyBonus(amount) * getLevel(recipient);
+                uint256 bonus = getBuyBonus(amount);
+                t.buyBonus = bonus + ((bonus * getLevel(recipient)) / levelCap);
             }
         }
         t.transferAmount = t.amount - t.fee - t.sellFee - t.buyFee - t.operationalFee;
