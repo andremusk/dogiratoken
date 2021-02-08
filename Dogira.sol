@@ -1326,6 +1326,7 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
     }
 
     function setMinBuyForBuyBonus(uint256 amount) external ownerOnly {
+        require(amount > 10000e18, "can't be less than 10k tokens");
         state.minBuyForBonus = amount * (10 ** state.decimals); 
     }
 
