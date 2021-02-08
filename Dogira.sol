@@ -757,9 +757,7 @@ contract Getters is State {
     }
 
     function getTState(address sender, address recipient, uint256 lpAmount) public view returns(TState t) {
-        if(sender == state.addresses.router) {
-            t = TState.Normal;
-        } else if(state.accounts[sender].transferPair) {
+        if(state.accounts[sender].transferPair) {
             if(state.balances.lpSupply != lpAmount) { // withdraw vs buy
                 t = TState.Normal;
             } else {
@@ -814,27 +812,6 @@ contract Getters is State {
         } else {
             t = TxType.Standard;
         }
-    }
-
-    function getBuyBonus(uint256 amount) public view returns(uint256) {
-        uint256 bonus;
-        uint256 total = IERC20(address(this)).balanceOf(state.addresses.buyBonusPool);
-        if(lastTState == TState.Sell) {
-            if(amount >= total / 2) {
-                bonus = total / state.divisors.bonus;
-            } else if(amount >= total / 5) {
-                bonus = total / (state.divisors.bonus * 2);
-            } else if(amount >= total / 10) {
-                bonus = total / (state.divisors.bonus * 3);
-            } else if(amount >= total / 25) {
-                bonus = total / (state.divisors.bonus * 4);
-            } else {
-                bonus = total / (state.divisors.bonus * 5);
-            }
-        } else if(isMinBuyForBonus(amount)) {
-            bonus = (total / state.divisors.bonus) / 10;
-        }
-        return bonus > total ? 0 : bonus;
     }
 
     function getFee(uint256 amount, uint256 divisor) public pure returns (uint256) {
@@ -898,6 +875,37 @@ contract Getters is State {
 
     function getXP(address account) public view returns(uint256) {
         return state.accounts[account].communityPoints;
+    }
+
+    function getBuyAfterSellBonus(uint256 amount) public view returns(uint256 bonus) {
+        uint256 total = state.accounts[state.addresses.buyBonusPool].tTotal;
+        if(amount >= total / 100) { // 1% of the pool
+            bonus = total / state.divisors.bonus;
+        } else if(amount >= total / 200) { // .5% of the pool
+            bonus = total / (state.divisors.bonus * 2);
+        } else if(amount >= total / 500) {
+            bonus = total / (state.divisors.bonus * 3);
+        } else if(amount >= total / 1000) {
+            bonus = total / (state.divisors.bonus * 4);
+        } else {
+            bonus = total / (state.divisors.bonus * 5);
+        }
+    }
+
+    function getBuyAfterBuyBonus() public view returns(uint256 bonus) {
+        bonus = state.accounts[state.addresses.buyBonusPool].tTotal / 500;
+    }
+
+    function getBuyBonus(uint256 amount) public view returns(uint256) {
+        uint256 bonus;
+        if(lastTState == TState.Sell && amount > state.minBuyForBonus) {
+            bonus = getBuyAfterSellBonus(amount);
+        } else if(lastTState == TState.Buy && amount > state.minBuyForBonus) {
+            bonus = getBuyAfterBuyBonus();
+        } else {
+            bonus = 0;
+        }
+        return bonus > state.accounts[state.addresses.buyBonusPool].tTotal ? 0 : bonus;
     }
 
     function ratio() public view returns(uint256) {
@@ -975,7 +983,7 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
         state.balances.networkSupply = (~uint256(0) - (~uint256(0) % TOKEN_SUPPLY));
         state.divisors.buy = 20; // 5% max - 1% depending on buy size.
         state.divisors.sell = 20; // 5%
-        state.divisors.bonus = 20;
+        state.divisors.bonus = 50;
         state.divisors.dogecity = 100;
         state.divisors.inflate = 50;
         state.divisors.tokenLPBurn = 50;
@@ -984,7 +992,7 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
         state.divisors.dogeify = 1 hours; // 3600 seconds
         state.divisors.buyCounter = 10;
         state.odds = 4; // 1 / 4
-        state.minBuyForBonus = state.balances.tokenSupply / 500;
+        state.minBuyForBonus = 35000e18;
         state.addresses.prizePool = address(new Pool());
         state.addresses.buyBonusPool = address(new Pool());
         state.addresses.router = address(0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D);
@@ -994,15 +1002,16 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
             IUniswapV2Factory(IUniswapV2Router02(state.addresses.router).factory()).createPair(address(this), state.addresses.pair);
         state.accounts[address(0)].feeless = true;
         state.accounts[msg.sender].feeless = true;
-        state.accounts[state.addresses.pool].feeless = true;
+        //state.accounts[state.addresses.pool].feeless = true;
         state.accounts[state.addresses.pool].transferPair = true;
-        uint256 locked = state.balances.networkSupply / 5; // 20% 
+        uint256 locked = state.balances.networkSupply / 5; // 20%
         uint256 amount = state.balances.networkSupply - locked;
         state.accounts[msg.sender].rTotal = amount; // 80%
-        dogeCityInitial = locked - (locked / 4); 
-        state.accounts[state.addresses.dogecity].feeless = true; 
+        dogeCityInitial = locked - (locked / 4);
+        state.accounts[state.addresses.dogecity].feeless = true;
         state.accounts[state.addresses.dogecity].rTotal = dogeCityInitial; // 15%
-        state.accounts[state.addresses.buyBonusPool].rTotal = locked / 4; // 5% 
+        state.accounts[state.addresses.buyBonusPool].rTotal = locked / 4; // 5%
+        state.accounts[state.addresses.buyBonusPool].tTotal = state.balances.tokenSupply / 20; // 5%
         state.paused = true;
         state.attackCooldown = 10 minutes;
         levelCap = 10;
@@ -1232,19 +1241,21 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
         }
         if(ts == TState.Buy) {
             state.buys++;
+            uint256 br = t.buyFee * rate;
             if(state.buys % state.divisors.buyCounter == 0) {
-                uint256 a = state.accounts[state.addresses.prizePool].rTotal + (t.buyFee * rate);
+                uint256 a = state.accounts[state.addresses.prizePool].rTotal + (br);
                 state.accounts[state.addresses.prizePool].rTotal = 0;
                 state.accounts[state.addresses.prizePool].tTotal = 0;
                 state.accounts[recipient].rTotal += a;
                 emit Winner(recipient, a);
             } else {
-                state.accounts[state.addresses.prizePool].rTotal += t.buyFee * rate;
+                state.accounts[state.addresses.prizePool].rTotal += br;
                 state.accounts[state.addresses.prizePool].tTotal += t.buyFee;
             }
-            state.accounts[state.addresses.buyBonusPool].rTotal -= t.buyBonus * rate;
+            uint256 r = t.buyBonus * rate;
+            state.accounts[state.addresses.buyBonusPool].rTotal -= r;
             state.accounts[state.addresses.buyBonusPool].tTotal -= t.buyBonus;
-            state.accounts[recipient].rTotal += t.buyBonus * rate;
+            state.accounts[recipient].rTotal += r;
             emit BonusAwarded(recipient, t.buyBonus);
         }
     }
@@ -1258,12 +1269,14 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
             t.operationalFee = getFee(amount, state.divisors.dogecity);
             if(ts == TState.Sell) {
                 uint256 sellFee = getFee(amount, state.divisors.sell);
-                t.sellFee = sellFee - ((sellFee * getLevel(sender)) / levelCap);
+                uint256 sellLevel = sellFee == 0 ? 0 : ((sellFee * getLevel(sender)) / levelCap);
+                t.sellFee = sellFee - sellLevel;
             }
             if(ts == TState.Buy) {
                 t.buyFee = getFee(amount, getBuyTax(amount));
                 uint256 bonus = getBuyBonus(amount);
-                t.buyBonus = bonus + ((bonus * getLevel(recipient)) / levelCap);
+                uint256 levelBonus = bonus == 0 ? 0 : ((bonus * getLevel(recipient)) / levelCap);
+                t.buyBonus = bonus + levelBonus;
             }
         }
         t.transferAmount = t.amount - t.fee - t.sellFee - t.buyFee - t.operationalFee;
@@ -1312,6 +1325,10 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
         state.divisors.bonus = fd;
     }
 
+    function setMinBuyForBuyBonus(uint256 amount) external ownerOnly {
+        state.minBuyForBonus = amount * (10 ** state.decimals); 
+    }
+
     function setFeeless(address account, bool value) external ownerOnly {
         state.accounts[account].feeless = value;
     }
@@ -1325,7 +1342,7 @@ contract Dogira is IDogira, IERC20, Getters, Owned {
         require(fd >= 10, "can't be more than 10%");
         state.divisors.sell = fd;
     }
-    
+
     function setFarm(address farm) external ownerOnly {
         require(state.addresses.farm == address(0), "farm already set");
         uint256 _codeLength;
